@@ -1,0 +1,4 @@
+se você tentar logar com uma senha errada, essa senha vai ficar em cache e 
+toda vez que você tentar iniciar o mt5 ele vai tentar puxar por essa senha
+e se a senha tiver errada, nem o 'initialize()' vai funcionar, muito menos a 
+função 'login()'
