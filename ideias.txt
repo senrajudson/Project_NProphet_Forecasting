@@ -1,0 +1,7 @@
+criar um código py para fazer requests na api e testala
+
+6076 - atual 13:44
+
+6079 30 min 14:13:00
+
+[0, 6070.5, Timestamp('2024-12-20 14:43:00')]

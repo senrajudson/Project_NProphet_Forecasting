@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-file = 'forecast_neuralprophet_rolling_with_volume_30_min_1200.csv'
+file = 'forecast_neuralprophet_rolling_with_volume_30_min_300.csv'
 
 # Carregar os dados
 df = pd.read_csv(file)
@@ -32,7 +32,7 @@ df['real_diff'] = df['y'] - df['y'].shift(1)
 
 df['predicted_diff'] = df['y'] - df['yhat1'].shift(1)
 
-df = df[(df['predicted_diff'] >= 5) | (df['predicted_diff'] <= -5)]
+# df = df[(df['predicted_diff'] >= 5) | (df['predicted_diff'] <= -5)]
 
 # Somar os ganhos e perdas
 df['score'] = df.apply(lambda row: row['real_diff'] if row['correct'] else -row['real_diff'], axis=1)
@@ -56,4 +56,4 @@ print(df[['ds', 'y', 'yhat1', 'real_direction', 'predicted_direction', 'correct'
 
 # Printar o resultado
 print(f'Porcentagem de acertos do modelo: {accuracy:.2f}%')
-print(f'Ganhos: {total_score * 10} reais em {unique_days} dias')
+# print(f'Ganhos: {total_score * 10} reais em {unique_days} dias')

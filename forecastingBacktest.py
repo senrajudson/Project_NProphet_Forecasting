@@ -119,6 +119,11 @@ def forecast_neuralprophet_rolling_with_volume(df, train_size=50, predict_size=1
     df = df.rename(columns={'time': 'ds', 'close': 'y'})  # 'time' vira 'ds' e 'close' vira 'y'
     df = df[['ds', 'y', "open", "tick_volume", "real_volume"]]  # Incluir 'volume' como variável de regressor
 
+    # # Renomear colunas BTC
+    # df = df.rename(columns={'Data/Hora': 'ds', 'Fechamento': 'y'})  # 'time' vira 'ds' e 'close' vira 'y'
+    # df = df[['ds', 'y', "Abertura", "Volume"]]
+    # df.rename(columns={'Abertura': 'open', 'Volume': 'real_volume'}, inplace=True)
+
     results = []
     total_points = len(df)
 
@@ -137,18 +142,19 @@ def forecast_neuralprophet_rolling_with_volume(df, train_size=50, predict_size=1
         test_df['open'] = last_open
         test_df['tick_volume'] = last_tick_volume
         test_df['real_volume'] = last_real_volume
-
-
+        test_df["y"] = None
 
         model = NeuralProphet()
         model.add_future_regressor('open')
         model.add_future_regressor('tick_volume')
         model.add_future_regressor('real_volume')
         model.fit(train_df)
+
         forecast = model.predict(test_df)
 
         forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
 
+        test_df['y'] = df['y'].iloc[start + train_size:start + train_size + predict_size]
         comparison = test_df[['ds', 'y']].copy()
         comparison['yhat1'] = forecast['yhat1'].values
         comparison["open"] = test_df['open']
@@ -185,11 +191,13 @@ if __name__ == "__main__":
     symbol = 'WDO@D'
     timeframe = mt5.TIMEFRAME_M1
     start_pos = 0
-    num_bars = 1200
+    num_bars = 300
     train_size = 50
     predict_size = 30
 
     df = get_data(symbol, timeframe, num_bars, start_pos)
+
+    # df = pd.read_csv("btc_last_6000.csv")
     comparison = forecast_neuralprophet_rolling_with_volume(df, train_size, predict_size, max_data=num_bars)
 
     file = f"forecast_neuralprophet_rolling_with_volume_{predict_size}_min_{num_bars}"

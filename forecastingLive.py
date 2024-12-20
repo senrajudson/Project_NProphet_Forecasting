@@ -36,34 +36,56 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30):
     from neuralprophet import NeuralProphet
     # Treinar o modelo
     model = NeuralProphet()
+    result = []
 
     # Renomear colunas
     df = df.rename(columns={'time': 'ds', 'close': 'y'})
-    df = df[['ds', 'y', 'open']]
+    df = df[['ds', 'y', 'open', "tick_volume", "real_volume"]]
 
-    future_dates = model.make_future_dataframe(df, periods=predict_size)
+    # Renomear colunas
+    # df = df.rename(columns={'Data/Hora': 'ds', 'Fechamento': 'y'})  # 'time' vira 'ds' e 'close' vira 'y'
+    # df = df[['ds', 'y', "Abertura", "Volume"]]
+    # df.rename(columns={'Abertura': 'open', 'Volume': 'real_volume'}, inplace=True)
+
+    df['ds'] = pd.to_datetime(df['ds'])
+
+    # Criar timestamps futuros
+    last_date = df['ds'].iloc[-1]
+    dates = pd.date_range(start=last_date + pd.Timedelta(minutes=1),
+                                 periods=predict_size, freq='T')
+    
+    future_dates = pd.DataFrame({'ds': dates})
+
+    # future_dates = model.make_future_dataframe(df, periods=predict_size)
     future_dates['open'] = df['open'].iloc[-1]
-    # print(future_dates)
-
+    future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
+    future_dates['real_volume'] = df['real_volume'].iloc[-1]
+    future_dates['y'] = None
+    print(future_dates)
  
     model.add_future_regressor('open')
+    model.add_future_regressor('tick_volume')
+    model.add_future_regressor('real_volume')
     model.fit(df)
 
     # Fazer a previsão
     forecast = model.predict(future_dates)
 
     forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
+    
+    future_dates['yhat1'] = forecast['yhat1'].values
 
     # Calcular o último valor da diferença
-    last_diff = df['y'].iloc[-1] - forecast['yhat1'].iloc[-1]
+    last_diff = df['y'].iloc[-1] - future_dates['yhat1'].iloc[-1]
 
     # Definir 0 ou 1 com base na soma
     flag = 1 if last_diff < 0 else 0
 
     # Retornar o resultado
-    result = [last_diff, flag]
 
-    return result, forecast
+    result = [flag, future_dates['yhat1'].iloc[-1], future_dates['ds'].iloc[-1]]
+
+    return result, future_dates
 
 if __name__ == "__main__":
     # Exemplo de chamada
@@ -89,14 +111,15 @@ if __name__ == "__main__":
     symbol = 'WDO@D'
     timeframe = mt5.TIMEFRAME_M1
     start_pos = 0
-    train_size = 50
+    train_size = 110
     predict_size = 30
     
     df = get_data(symbol, timeframe, train_size)
+
+    # df = pd.read_csv("btc_last_100.csv")
     result, forecast = forecast_neuralprophet_rolling_with_open_price(df, predict_size)
     # comparison.to_csv(f"forecast_neuralprophet_rolling.csv", index=False)
 
     # Exibir previsões
-    # print(df)
-    print(result)
     print(forecast)
+    print(result)
