@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import MetaTrader5 as mt5
 import pandas as pd
 import logging
+import uvicorn
 import os
 
 app = FastAPI()
@@ -102,3 +103,6 @@ def get_last_forecast():
     if not last_forecast:
         raise HTTPException(status_code=404, detail="Nenhuma previsão encontrada")
     return last_forecast
+
+if __name__ == "__main__":
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
