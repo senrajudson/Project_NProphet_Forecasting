@@ -1,19 +1,19 @@
 import pandas as pd
 import numpy as np
 
-file = 'forecast_neuralprophet_rolling_with_volume_30_min_300.csv'
+file = 'forecast_neuralprophet_rolling_with_volume_50_30_0_min_600_Lag.csv'
 
 # Carregar os dados
 df = pd.read_csv(file)
 
-# Vou usar um critério simples de "outlier" com base no desvio padrão
-# threshold = 10000  # Este valor pode ser ajustado dependendo do seu contexto
+# Vou usar um cKCritério simples de "outlier" com base no desvio padrão
+threshold = 100000  # Este valor pode ser ajustado dependendo do seu contexto
 
-# # Identificar valores aberrantes (outliers) na coluna 'yhat1'
-# df['is_outlier'] = (df['yhat1'].abs() > threshold)
+# Identificar valores aberrantes (outliers) na coluna 'yhat1'
+df['is_outlier'] = (df['yhat1'].abs() > threshold)
 
 # Remover ou corrigir os outliers
-# df.loc[df['is_outlier'], 'yhat1'] = np.nan  # Substituir os outliers por NaN
+df.loc[df['is_outlier'], 'yhat1'] = np.nan  # Substituir os outliers por NaN
 
 # Preencher valores NaN com a última previsão válida (método simples)
 df['yhat1'].fillna(method='ffill', inplace=True)
@@ -32,12 +32,14 @@ df['real_diff'] = df['y'] - df['y'].shift(1)
 
 df['predicted_diff'] = df['y'] - df['yhat1'].shift(1)
 
-# df = df[(df['predicted_diff'] >= 5) | (df['predicted_diff'] <= -5)]
+df = df[(df['predicted_diff'] >= 5) | (df['predicted_diff'] <= -5)]
 
 # Somar os ganhos e perdas
 df['score'] = df.apply(lambda row: row['real_diff'] if row['correct'] else -row['real_diff'], axis=1)
-
 df['score'] = df.apply(lambda row: abs(row['score']) if row['correct'] else -abs(row['score']), axis=1)
+df = df.loc[~((df['score'] < 0) & (df['score'].abs() > 5))]
+
+df = df.drop(columns=['is_outlier'])
 
 df.to_csv(f"{file}_results.csv", index=False)
 
@@ -56,4 +58,4 @@ print(df[['ds', 'y', 'yhat1', 'real_direction', 'predicted_direction', 'correct'
 
 # Printar o resultado
 print(f'Porcentagem de acertos do modelo: {accuracy:.2f}%')
-# print(f'Ganhos: {total_score * 10} reais em {unique_days} dias')
+print(f'Ganhos: {total_score * 10 * 1 * 0.8} reais em {unique_days} dias')

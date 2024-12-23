@@ -30,6 +30,8 @@ def get_data(symbol, timeframe, num_bars, start_pos = 0):
     return df
 
 def round_to_half(value):
+    if pd.isna(value):
+        return value
     return round(value * 2) / 2
 
 def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30):
@@ -57,15 +59,15 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30):
     future_dates = pd.DataFrame({'ds': dates})
 
     # future_dates = model.make_future_dataframe(df, periods=predict_size)
-    future_dates['open'] = df['open'].iloc[-1]
-    future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
-    future_dates['real_volume'] = df['real_volume'].iloc[-1]
-    future_dates['y'] = None
-    print(future_dates)
+    # future_dates['open'] = df['open'].iloc[-1]
+    # future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
+    # future_dates['real_volume'] = df['real_volume'].iloc[-1]
+    # future_dates['y'] = None
+    # print(future_dates)
  
-    model.add_future_regressor('open')
-    model.add_future_regressor('tick_volume')
-    model.add_future_regressor('real_volume')
+    model.add_lagged_regressor('open')
+    model.add_lagged_regressor('tick_volume')
+    model.add_lagged_regressor('real_volume')
     model.fit(df)
 
     # Fazer a previsão
