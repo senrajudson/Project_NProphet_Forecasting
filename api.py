@@ -79,8 +79,7 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30, lagged_r
     if mode == 'Lag':
         ## para usar lagging
         df = lagging_df(df, predict_size)
-
-    print(df)
+        df.dropna(subset=['y'], inplace=True)
 
     if mode == "Future":
 
@@ -91,30 +90,35 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30, lagged_r
         future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
         future_dates['real_volume'] = df['real_volume'].iloc[-1]
         future_dates['y'] = None
-    
+
+        # print(future_dates)
+
+        df = pd.concat([df, future_dates], ignore_index=True)
+
         model.add_future_regressor('open')
         model.add_future_regressor('tick_volume')
         model.add_future_regressor('real_volume')
-        model.fit(df)
-        forecast = model.predict(future_dates)
 
     if mode == "Lag":
 
         model.add_lagged_regressor('open', n_lags=lagged_regressor)
         model.add_lagged_regressor('tick_volume', n_lags=lagged_regressor)
         model.add_lagged_regressor('real_volume', n_lags=lagged_regressor)
-        model.fit(df)
-        forecast = model.predict(df)
+
+
+    model.fit(df)
+    forecast = model.predict(df)
 
     forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
-    yhat1_values = forecast['yhat1'].values
+    
+    df['yhat1'] = forecast['yhat1'].values
 
     # print(df.tail(predict_size+5)) 
 
-    yhat_pred = yhat1_values[-1] 
+    yhat_pred = df['yhat1'].iloc[-1] 
 
     # Removendo as linhas com valores nulos
-    df.dropna(subset=['y'], inplace=True)
+    # df.dropna(subset=['y'], inplace=True)
 
     last_diff = yhat_pred - df['y'].iloc[-(predict_size+1)]
     flag = 1 if last_diff > 0 else 0
@@ -124,7 +128,7 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30, lagged_r
     result = {
         "flag": flag,
         "predicted_value": yhat_pred,
-        "last_prediction_time": str(df['ds'].iloc[-1]),
+        "last_prediction_time": df['ds'].iloc[-1].strftime("%Y.%m.%d %H:%M:%S"),
     }
 
     # print(df)
@@ -160,3 +164,4 @@ def get_last_forecast():
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
+    print("Hellow new world!")
