@@ -1,13 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import MetaTrader5 as mt5
+from time import time
 import pandas as pd
 import uvicorn
 import torch
 import os
 
 app = FastAPI()
+request_counts = {}
 
 # Variáveis globais para armazenar a última previsão
 last_forecast = {}
@@ -147,6 +149,26 @@ def startup_event():
     
     if not mt5.login(int(LOGIN), PASSWORD, SERVER):
         raise HTTPException(status_code=500, detail=f"Erro ao fazer login: {mt5.last_error()}")
+    
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host
+    now = time()
+    window = 1  # Janela de 10 segundos
+    max_requests = 3  # Máximo de 5 requisições por janela
+
+    if client_ip not in request_counts:
+        request_counts[client_ip] = []
+
+    request_counts[client_ip] = [
+        timestamp for timestamp in request_counts[client_ip] if now - timestamp < window
+    ]
+
+    if len(request_counts[client_ip]) >= max_requests:
+        raise HTTPException(status_code=429, detail="Too many requests")
+
+    request_counts[client_ip].append(now)
+    return await call_next(request)
 
 @app.post("/forecast/")
 def post_forecast(request: ForecastPost):
