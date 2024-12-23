@@ -3,8 +3,8 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import MetaTrader5 as mt5
 import pandas as pd
-import logging
 import uvicorn
+import torch
 import os
 
 app = FastAPI()
@@ -17,64 +17,118 @@ class ForecastPost(BaseModel):
     predict_size: int
     train_size: int
     start_time: str = None  # Novo campo opcional para data e hora de início
+    lagged_regressor : int = 0 # campo opcional para cálculo de regressores usando lagged_regressor
+    mode : str = "Future" # campo opcional para escolha do modo
 
 class ForecastGet(BaseModel):
     flag: int
     predicted_value: float
     last_prediction_time: str
 
-def get_data(symbol, train_size, start_time=None):
+def round_to_half(value):
+    if pd.isna(value):
+        return value
+    return round(value * 2) / 2
+
+def get_data(symbol, train_size, predict_size, start_time=None, lagged_regressor=0, mode="Future"):
+
+    if mode == "Future":
+        data = train_size
+    if mode == "Lag":
+        data = lagged_regressor+train_size+(predict_size*2)
+
     if start_time:
         start_time_dt = pd.to_datetime(start_time)
         start_timestamp = int(start_time_dt.timestamp())
-        rates = mt5.copy_rates_from(symbol, mt5.TIMEFRAME_M1, start_timestamp, train_size)
+        rates = mt5.copy_rates_from(symbol, mt5.TIMEFRAME_M1, start_timestamp, data)
+
     else:
-        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, train_size)
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, data)
 
     if rates is None:
         raise HTTPException(status_code=500, detail=f"Erro ao obter os dados: {mt5.last_error()}")
     
     df = pd.DataFrame(rates)
     df['time'] = pd.to_datetime(df['time'], unit='s')
+    
     df['dayOfWeek'] = df['time'].dt.day_name()
+
+    df = df.rename(columns={'time': 'ds', 'close': 'y'})
+    df = df[['ds', 'y', 'open', 'tick_volume', 'real_volume']]
+    
     return df
 
-def round_to_half(value):
-    return round(value * 2) / 2
+def lagging_df(df, predict_size):
 
-def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30):
+    colunas_para_shift = ['open', 'tick_volume', 'real_volume']
+
+    # Aplicando o shift nas colunas especificadas
+    df[colunas_para_shift] = df[colunas_para_shift].shift(periods=predict_size)
+
+    # Removendo as linhas com valores nulos
+    df.dropna(subset=['open'], inplace=True)
+
+    return df
+
+def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30, lagged_regressor=0, mode="Future"):
     from neuralprophet import NeuralProphet
     model = NeuralProphet()
-    df = df.rename(columns={'time': 'ds', 'close': 'y'})
-    df = df[['ds', 'y', 'open', "tick_volume", "real_volume"]]
-    df['ds'] = pd.to_datetime(df['ds'])
+    model.device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(torch.cuda.is_available())
 
-    last_date = df['ds'].iloc[-1]
-    dates = pd.date_range(start=last_date + pd.Timedelta(minutes=1), periods=predict_size, freq='T')
-    future_dates = pd.DataFrame({'ds': dates})
-    future_dates['open'] = df['open'].iloc[-1]
-    future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
-    future_dates['real_volume'] = df['real_volume'].iloc[-1]
-    future_dates['y'] = None
+    if mode == 'Lag':
+        ## para usar lagging
+        df = lagging_df(df, predict_size)
 
-    model.add_future_regressor('open')
-    model.add_future_regressor('tick_volume')
-    model.add_future_regressor('real_volume')
-    model.fit(df)
+    print(df)
 
-    forecast = model.predict(future_dates)
+    if mode == "Future":
+
+        last_date = df['ds'].iloc[-1]
+        dates = pd.date_range(start=last_date + pd.Timedelta(minutes=1), periods=predict_size, freq='T')
+        future_dates = pd.DataFrame({'ds': dates})
+        future_dates['open'] = df['open'].iloc[-1]
+        future_dates['tick_volume'] = df['tick_volume'].iloc[-1]
+        future_dates['real_volume'] = df['real_volume'].iloc[-1]
+        future_dates['y'] = None
+    
+        model.add_future_regressor('open')
+        model.add_future_regressor('tick_volume')
+        model.add_future_regressor('real_volume')
+        model.fit(df)
+        forecast = model.predict(future_dates)
+
+    if mode == "Lag":
+
+        model.add_lagged_regressor('open', n_lags=lagged_regressor)
+        model.add_lagged_regressor('tick_volume', n_lags=lagged_regressor)
+        model.add_lagged_regressor('real_volume', n_lags=lagged_regressor)
+        model.fit(df)
+        forecast = model.predict(df)
+
     forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
-    future_dates['yhat1'] = forecast['yhat1'].values
+    yhat1_values = forecast['yhat1'].values
 
-    last_diff = df['y'].iloc[-1] - future_dates['yhat1'].iloc[-1]
-    flag = 1 if last_diff < 0 else 0
+    # print(df.tail(predict_size+5)) 
+
+    yhat_pred = yhat1_values[-1] 
+
+    # Removendo as linhas com valores nulos
+    df.dropna(subset=['y'], inplace=True)
+
+    last_diff = yhat_pred - df['y'].iloc[-(predict_size+1)]
+    flag = 1 if last_diff > 0 else 0
+
+    print(df.tail(predict_size+5))
 
     result = {
         "flag": flag,
-        "predicted_value": future_dates['yhat1'].iloc[-1],
-        "last_prediction_time": str(future_dates['ds'].iloc[-1]),
+        "predicted_value": yhat_pred,
+        "last_prediction_time": str(df['ds'].iloc[-1]),
     }
-    return result, future_dates
+
+    # print(df)
+    return result, df
 
 # Rotas da API
 @app.on_event("startup")
@@ -93,8 +147,8 @@ def startup_event():
 @app.post("/forecast/")
 def post_forecast(request: ForecastPost):
     global last_forecast
-    df = get_data(request.symbol, request.train_size, request.start_time)
-    result, _ = forecast_neuralprophet_rolling_with_open_price(df, request.predict_size)
+    df = get_data(request.symbol, request.train_size, request.predict_size, request.start_time, request.lagged_regressor, request.mode)
+    result, _ = forecast_neuralprophet_rolling_with_open_price(df, request.predict_size, request.lagged_regressor, request.mode)
     last_forecast = result
     return result
 
@@ -105,4 +159,4 @@ def get_last_forecast():
     return last_forecast
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
