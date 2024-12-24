@@ -65,22 +65,13 @@ def future_df(df, train_size, predict_size):
 
     return result_df
 
-def forecast_neuralprophet_rolling_with_volume(df, train_size=50, predict_size=10, max_data=600, lagged_regressor=0, mode="Future"):
+def forecast_neuralprophet_rolling_with_volume(df, train_size=50, predict_size=10, max_data=600, lagged_regressor=0, mode="Lag"):
     from neuralprophet import NeuralProphet
 
     # Limitar o dataframe a 'max_data'
     df = df.head(max_data)
 
-    if mode == 'Lag':
-        ## para usar lagging
-        df = lagging_df(df, predict_size)
-
     cols_toregressor = ['open', 'tick_volume', 'real_volume']
-
-    # # Renomear colunas BTC
-    # df = df.rename(columns={'Data/Hora': 'ds', 'Fechamento': 'y'})  # 'time' vira 'ds' e 'close' vira 'y'
-    # df = df[['ds', 'y', "Abertura", "Volume"]]
-    # df.rename(columns={'Abertura': 'open', 'Volume': 'real_volume'}, inplace=True)
 
     results = []
     total_points = len(df)
@@ -89,38 +80,73 @@ def forecast_neuralprophet_rolling_with_volume(df, train_size=50, predict_size=1
         raise ValueError("O dataframe tem poucos dados para realizar o teste.")
 
     for start in range(0, total_points - train_size - predict_size + 1, predict_size):
-        model = NeuralProphet()
-        
+        model = NeuralProphet(n_forecasts=predict_size)
         train_df = df.iloc[start:start + train_size]
-        test_df = df.iloc[start + train_size:start + train_size + predict_size]
-
+        
         if mode == "Future":
-            # atualmente, não estou conseguindo desenvolver uma função para future regressor, vai assim mesmo
+            test_df = df.iloc[start + train_size:start + train_size + predict_size]
             test_df[cols_toregressor] = train_df[cols_toregressor].iloc[-1].values
             test_df["y"] = None
-        
+
             # model.add_future_regressor(cols_toregressor)
-        
+
             model.add_future_regressor('open')
             model.add_future_regressor('tick_volume')
             model.add_future_regressor('real_volume')
 
         if mode == "Lag":
-            ### add lagged regressor
-            model.add_lagged_regressor(cols_toregressor, n_lags=lagged_regressor)
+            ## hist 180
+            test_df = model.make_future_dataframe(train_df, n_historic_predictions=predict_size, periods=predict_size)
 
-        model.fit(train_df,  freq="1min",)
+            model.add_lagged_regressor(cols_toregressor)
+
+        model.fit(train_df, freq="1min")
 
         forecast = model.predict(test_df)
 
-        forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
+        if mode == "Lag":
+            # Obter apenas as colunas que começam com 'yhat'
+            yhat_cols = [col for col in forecast.columns if col.startswith('yhat')]
 
-        test_df['y'] = df['y'].iloc[start + train_size:start + train_size + predict_size]
-        comparison = test_df[['ds', 'y']].copy()
-        comparison['yhat1'] = forecast['yhat1'].values
-        comparison[cols_toregressor] = test_df[cols_toregressor]
-        comparison = comparison.iloc[::predict_size].reset_index(drop=True)
+            # Empilhar os valores previstos em uma única coluna
+            forecast_long = forecast[['ds'] + yhat_cols].melt(
+                id_vars=['ds'], 
+                value_vars=yhat_cols, 
+                var_name='yhat_column', 
+                value_name='yhat'
+            )
 
+            # Ajustar o índice para alinhar corretamente as previsões com as linhas do dataframe de comparação
+            forecast_long['index'] = forecast_long.groupby('yhat_column').cumcount()
+
+            # Criar dataframe de comparação
+            comparison = df.iloc[start + train_size:start + train_size + predict_size][['ds', 'y']].copy()
+            comparison.reset_index(drop=True, inplace=True)
+            comparison[cols_toregressor] = train_df[cols_toregressor]
+
+            # Combinar previsões ao dataframe de comparação
+            comparison = pd.merge(
+                comparison.reset_index(),
+                forecast_long[['index', 'yhat']],
+                left_index=True,
+                right_on='index',
+                how='left'
+            )
+
+            comparison['yhat'] = comparison['yhat'].apply(round_to_half)  # Aplicar round_to_half se necessário
+            comparison.drop(columns=['index'], inplace=True)
+
+        if mode == 'Future':
+
+            forecast['yhat1'] = forecast['yhat1'].apply(round_to_half)
+
+            test_df['y'] = df['y'].iloc[start + train_size:start + train_size + predict_size]
+            comparison = test_df[['ds', 'y']].copy()
+            comparison['yhat'] = forecast['yhat1'].values
+            comparison[cols_toregressor] = test_df[cols_toregressor]
+
+
+        # comparison = comparison.iloc[::predict_size].reset_index(drop=True)
         results.append(comparison)
 
     return pd.concat(results, ignore_index=True)
@@ -148,14 +174,14 @@ if __name__ == "__main__":
     # settings
     symbol = 'WDO@D'
     timeframe = mt5.TIMEFRAME_M1
-    num_bars = 600
+    num_bars = 180
     train_size = 50
     predict_size = 30
     lagged_regressor = 0
     mode = 'Lag'
 
     df = get_data(symbol, timeframe, num_bars, predict_size, train_size)
-    df.to_csv(f"new_stats_future.csv", index=False)
+    df.to_csv(f"new_stats_{mode}.csv", index=False)
 
     # df = pd.read_csv("btc_last_6000.csv")
     comparison = forecast_neuralprophet_rolling_with_volume(df, train_size, predict_size, num_bars , lagged_regressor, mode)
