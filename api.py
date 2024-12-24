@@ -101,12 +101,11 @@ def forecast_neuralprophet_rolling_with_open_price(df, predict_size=30, lagged_r
     print(torch.cuda.is_available())
     
     model.fit(df, freq="1min")
-
-    future = model.make_future_dataframe(
-        df.copy(), periods=predict_size, n_historic_predictions=len(df)
-        )
     
     if mode == 'Lag':
+        future = model.make_future_dataframe(
+            df.copy(), periods=predict_size, n_historic_predictions=len(df)
+            )
         forecast = model.predict(future)
     
     if mode == 'Future':
